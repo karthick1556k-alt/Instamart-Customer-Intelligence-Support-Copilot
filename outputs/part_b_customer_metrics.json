@@ -1,0 +1,21 @@
+{
+  "cohort_customers": 1156,
+  "lapsed_customers": 443,
+  "train_rows": 924,
+  "test_rows": 232,
+  "logistic_best_params": {
+    "model__C": 100
+  },
+  "logistic_cv_f1": 0.650552962900789,
+  "logistic_test_f1": 0.6480446927374302,
+  "random_forest_best_params": {
+    "model__max_depth": 8,
+    "model__min_samples_leaf": 10
+  },
+  "random_forest_cv_f1": 0.6865517479789224,
+  "random_forest_test_f1": 0.6368715083798883,
+  "selected_model": "Random Forest",
+  "selected_test_f1": 0.6368715083798883,
+  "reloaded_predictions_match": true,
+  "premium_retention_list_true_lapsed": 1
+}

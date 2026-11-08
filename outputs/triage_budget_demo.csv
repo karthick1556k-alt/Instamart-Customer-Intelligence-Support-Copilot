@@ -1,0 +1,165 @@
+ticket_id,true_category,category,status,tokens_used,raw_output
+T0024,fraud,fraud,classified_json,79,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0073,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0095,technical,billing,classified_json,77,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0159,none,,skipped_empty,0,
+T0080,fraud,billing,classified_json,79,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0124,fraud,billing,classified_json,79,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0061,billing,billing,classified_json,71,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0118,delivery,delivery,classified_json,74,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0037,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0002,delivery,delivery,classified_json,73,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0163,delivery,,flagged_long,0,
+T0031,technical,billing,classified_json,77,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0047,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0063,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0121,billing,billing,classified_keyword,79,The customer appears to have a billing-related problem.
+T0139,technical,technical,classified_json,82,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0115,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0123,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0116,fraud,,flagged_invalid_output,79,"{""category"": ""shipping"", ""reason"": ""parcel movement""}"
+T0136,fraud,fraud,classified_json,73,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0008,fraud,fraud,classified_json,79,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0102,delivery,delivery,classified_json,77,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0072,fraud,billing,classified_json,79,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0101,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0059,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0049,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0153,billing,billing,classified_json,71,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0050,delivery,delivery,classified_keyword,77,The customer appears to have a delivery-related problem.
+T0147,technical,billing,classified_json,77,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0074,delivery,delivery,classified_json,73,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0156,fraud,fraud,classified_json,79,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0145,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0053,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0134,delivery,delivery,classified_json,77,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0039,technical,technical,classified_json,82,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0016,fraud,,flagged_invalid_output,79,"{""category"": ""shipping"", ""reason"": ""parcel movement""}"
+T0055,technical,technical,classified_json,82,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0130,delivery,delivery,classified_json,77,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0099,technical,technical,classified_json,82,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0062,delivery,delivery,classified_json,73,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0013,billing,billing,classified_keyword,79,The customer appears to have a billing-related problem.
+T0137,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0152,fraud,billing,classified_json,79,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0144,fraud,billing,classified_json,79,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0094,delivery,delivery,classified_json,77,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0021,billing,billing,classified_json,71,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0077,billing,billing,classified_json,71,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0036,fraud,billing,classified_json,79,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0113,billing,billing,classified_json,71,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0060,fraud,fraud,classified_json,79,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0043,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0048,fraud,fraud,classified_json,73,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0154,delivery,,flagged_invalid_output,77,"{""category"": ""shipping"", ""reason"": ""parcel movement""}"
+T0125,billing,billing,classified_keyword,75,The customer appears to have a billing-related problem.
+T0146,delivery,delivery,classified_json,74,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0107,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0011,technical,technical,classified_json,82,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0017,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0111,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0041,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0120,fraud,fraud,classified_json,79,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0122,delivery,delivery,classified_json,73,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0001,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0064,fraud,fraud,classified_json,79,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0092,fraud,fraud,classified_json,73,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0038,delivery,delivery,classified_json,73,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0155,technical,technical,classified_keyword,86,The customer appears to have a technical-related problem.
+T0104,fraud,fraud,classified_json,73,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0012,fraud,billing,classified_json,79,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0084,fraud,,flagged_invalid_output,79,"{""category"": ""shipping"", ""reason"": ""parcel movement""}"
+T0051,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0143,technical,technical,classified_json,82,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0035,technical,billing,classified_json,77,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0028,fraud,fraud,classified_json,79,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0100,fraud,fraud,classified_json,79,"{""category"": ""fraud"", ""reason"": ""keyword match""}"
+T0022,delivery,delivery,classified_json,77,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0082,delivery,delivery,classified_json,73,"{""category"": ""delivery"", ""reason"": ""keyword match""}"
+T0127,technical,billing,classified_json,77,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0162,delivery,,flagged_long,0,
+T0109,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0046,delivery,delivery,classified_keyword,81,The customer appears to have a delivery-related problem.
+T0081,billing,billing,classified_json,75,"{""category"": ""billing"", ""reason"": ""keyword match""}"
+T0007,technical,technical,classified_json,66,"{""category"": ""technical"", ""reason"": ""keyword match""}"
+T0068,fraud,,budget_exhausted,0,
+T0085,billing,,budget_exhausted,0,
+T0075,technical,,budget_exhausted,0,
+T0052,fraud,,budget_exhausted,0,
+T0066,delivery,,budget_exhausted,0,
+T0151,technical,,budget_exhausted,0,
+T0131,technical,,budget_exhausted,0,
+T0006,delivery,,budget_exhausted,0,
+T0135,technical,,budget_exhausted,0,
+T0079,technical,,budget_exhausted,0,
+T0040,fraud,,budget_exhausted,0,
+T0093,billing,,budget_exhausted,0,
+T0089,billing,,budget_exhausted,0,
+T0034,delivery,,budget_exhausted,0,
+T0033,billing,,budget_exhausted,0,
+T0160,none,,skipped_empty,0,
+T0087,technical,,budget_exhausted,0,
+T0009,billing,,budget_exhausted,0,
+T0108,fraud,,budget_exhausted,0,
+T0054,delivery,,budget_exhausted,0,
+T0025,billing,,budget_exhausted,0,
+T0004,fraud,,budget_exhausted,0,
+T0148,fraud,,budget_exhausted,0,
+T0088,fraud,,budget_exhausted,0,
+T0030,delivery,,budget_exhausted,0,
+T0067,technical,,budget_exhausted,0,
+T0029,billing,,budget_exhausted,0,
+T0129,billing,,budget_exhausted,0,
+T0105,billing,,budget_exhausted,0,
+T0045,billing,,budget_exhausted,0,
+T0069,billing,,budget_exhausted,0,
+T0010,delivery,,budget_exhausted,0,
+T0023,technical,,budget_exhausted,0,
+T0106,delivery,,budget_exhausted,0,
+T0015,technical,,budget_exhausted,0,
+T0091,technical,,budget_exhausted,0,
+T0126,delivery,,budget_exhausted,0,
+T0096,fraud,,budget_exhausted,0,
+T0149,billing,,budget_exhausted,0,
+T0070,delivery,,budget_exhausted,0,
+T0026,delivery,,budget_exhausted,0,
+T0097,billing,,budget_exhausted,0,
+T0132,fraud,,budget_exhausted,0,
+T0027,technical,,budget_exhausted,0,
+T0119,technical,,budget_exhausted,0,
+T0157,none,,skipped_empty,0,
+T0058,delivery,,budget_exhausted,0,
+T0110,delivery,,budget_exhausted,0,
+T0018,delivery,,budget_exhausted,0,
+T0032,fraud,,budget_exhausted,0,
+T0003,technical,,budget_exhausted,0,
+T0042,delivery,,budget_exhausted,0,
+T0056,fraud,,budget_exhausted,0,
+T0114,delivery,,budget_exhausted,0,
+T0083,technical,,budget_exhausted,0,
+T0138,delivery,,budget_exhausted,0,
+T0057,billing,,budget_exhausted,0,
+T0076,fraud,,budget_exhausted,0,
+T0019,technical,,budget_exhausted,0,
+T0103,technical,,budget_exhausted,0,
+T0164,delivery,,flagged_long,0,
+T0090,delivery,,budget_exhausted,0,
+T0112,fraud,,budget_exhausted,0,
+T0133,billing,,budget_exhausted,0,
+T0014,delivery,,budget_exhausted,0,
+T0158,none,,skipped_empty,0,
+T0020,fraud,,budget_exhausted,0,
+T0142,delivery,,budget_exhausted,0,
+T0086,delivery,,budget_exhausted,0,
+T0141,billing,,budget_exhausted,0,
+T0044,fraud,,budget_exhausted,0,
+T0117,billing,,budget_exhausted,0,
+T0078,delivery,,budget_exhausted,0,
+T0140,fraud,,budget_exhausted,0,
+T0071,technical,,budget_exhausted,0,
+T0161,delivery,,flagged_long,0,
+T0150,delivery,,budget_exhausted,0,
+T0065,billing,,budget_exhausted,0,
+T0128,fraud,,budget_exhausted,0,
+T0005,billing,,budget_exhausted,0,
+T0098,delivery,,budget_exhausted,0,

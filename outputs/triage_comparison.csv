@@ -1,0 +1,3 @@
+run_name,total_tickets,classified_json,classified_keyword,flagged_invalid_output,skipped_empty,flagged_long,budget_exhausted,classified_count,accuracy,total_tokens,tokens_per_classified_ticket,retry_count,budget
+zero_shot,164,135,12,9,4,4,0,147,0.8571,11740,79.86,19,
+few_shot,164,135,12,9,4,4,0,147,1.0,24220,164.76,19,

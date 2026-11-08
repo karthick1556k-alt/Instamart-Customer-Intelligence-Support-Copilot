@@ -1,0 +1,40 @@
+{
+  "completed": {
+    "S1": {
+      "status": "COMPLETED",
+      "finished_at": "2026-10-29T05:52:01.739967+00:00",
+      "final_response": "REFUND: INR 128.25 was already issued."
+    },
+    "S2": {
+      "status": "COMPLETED",
+      "finished_at": "2026-10-29T05:52:01.754338+00:00",
+      "final_response": "REFUND: INR 135.0 was already issued."
+    },
+    "S3": {
+      "status": "COMPLETED",
+      "finished_at": "2026-10-29T04:41:26.195687+00:00",
+      "final_response": "ESCALATE: refund above INR 1000 sent to a human lead."
+    },
+    "S4": {
+      "status": "COMPLETED",
+      "finished_at": "2026-10-29T04:41:26.211075+00:00",
+      "final_response": "DENIED: delivery was within 45 minutes."
+    },
+    "S5": {
+      "status": "COMPLETED",
+      "finished_at": "2026-10-29T04:41:26.219814+00:00",
+      "final_response": "DENIED: only completed orders can be refunded."
+    },
+    "S6": {
+      "status": "COMPLETED",
+      "finished_at": "2026-10-29T04:41:26.226878+00:00",
+      "final_response": "NOT_FOUND: no such order."
+    },
+    "S7": {
+      "status": "STOPPED_SAFELY",
+      "finished_at": "2026-10-29T04:41:26.234499+00:00",
+      "final_response": "Stopped safely after repeated policy searches. Human review may be required."
+    }
+  },
+  "in_progress": {}
+}

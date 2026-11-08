@@ -1,0 +1,1907 @@
+from __future__ import annotations
+
+
+import json
+
+import re
+
+import sqlite3
+
+import sys
+
+import time
+
+import hashlib
+
+from datetime import datetime, timezone
+
+from pathlib import Path
+
+from typing import Any
+
+
+import pandas as pd
+
+import sys
+
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+if str(ROOT) not in sys.path:
+
+    sys.path.insert(0, str(ROOT))
+
+
+import mock_llm
+
+
+# ============================================================
+
+# CONFIGURATION
+
+# ============================================================
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+DB_PATH = ROOT / "data" / "instamart.db"
+
+SCENARIOS_PATH = ROOT / "data" / "raw" / "agent_scenarios.csv"
+
+
+OUTPUT_DIR = ROOT / "outputs"
+
+STATE_DIR = ROOT / "state"
+
+
+RUNS_PATH = OUTPUT_DIR / "agent_runs.jsonl"
+
+LEDGER_PATH = OUTPUT_DIR / "refund_ledger.jsonl"
+
+STATE_PATH = STATE_DIR / "part_d_state.json"
+
+
+MAX_STEPS = 6
+
+MAX_LLM_RETRIES = 3
+
+TOKEN_LIMIT = 6000
+
+TIME_LIMIT_SECONDS = 10.0
+
+
+REFUND_LIMIT = 1000.0
+
+ELIGIBLE_DELIVERY_MINUTES = 45.0
+
+
+POLICY_FILE = ROOT / "data" / "policies" / "refund_policy.txt"
+
+
+for directory in (OUTPUT_DIR, STATE_DIR):
+
+    directory.mkdir(parents=True, exist_ok=True)
+
+
+# ============================================================
+
+# UTILITIES
+
+# ============================================================
+
+
+def now_utc() -> str:
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+def json_default(value: Any) -> Any:
+
+    if hasattr(value, "item"):
+
+        return value.item()
+
+    if hasattr(value, "isoformat"):
+
+        return value.isoformat()
+
+    return str(value)
+
+
+def append_jsonl(path: Path, record: dict[str, Any]) -> None:
+
+    with path.open("a", encoding="utf-8") as file:
+
+        file.write(
+
+            json.dumps(record, ensure_ascii=False, default=json_default) + "\n"
+
+        )
+
+
+def read_jsonl(path: Path) -> list[dict[str, Any]]:
+
+    if not path.exists():
+
+        return []
+
+
+    records = []
+
+    with path.open("r", encoding="utf-8") as file:
+
+        for line in file:
+
+            if line.strip():
+
+                records.append(json.loads(line))
+
+    return records
+
+
+def save_state(state: dict[str, Any]) -> None:
+
+    temporary_path = STATE_PATH.with_suffix(".tmp")
+
+    temporary_path.write_text(
+
+        json.dumps(state, indent=2, default=json_default),
+
+        encoding="utf-8",
+
+    )
+
+    temporary_path.replace(STATE_PATH)
+
+
+def load_state() -> dict[str, Any]:
+
+    if not STATE_PATH.exists():
+
+        return {"completed": {}, "in_progress": {}}
+
+
+    try:
+
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+
+        state.setdefault("completed", {})
+
+        state.setdefault("in_progress", {})
+
+        return state
+
+    except (json.JSONDecodeError, OSError):
+
+        raise RuntimeError(
+
+            f"State file {STATE_PATH} is unreadable. "
+
+            "Inspect or restore it before continuing; do not overwrite it."
+
+        )
+
+
+def normalize(value: Any) -> str:
+
+    if value is None:
+
+        return ""
+
+    if pd.isna(value):
+
+        return ""
+
+    return str(value).strip()
+
+
+def first_value(row: dict[str, Any], names: list[str]) -> str:
+
+    """Return the first nonempty value from possible column names."""
+
+    lookup = {str(k).lower().strip(): v for k, v in row.items()}
+
+
+    for name in names:
+
+        value = normalize(lookup.get(name.lower()))
+
+        if value:
+
+            return value
+
+
+    return ""
+
+
+def parse_number(value: Any) -> float | None:
+
+    if value is None:
+
+        return None
+
+
+    match = re.search(r"-?\d+(?:\.\d+)?", str(value).replace(",", ""))
+
+    return float(match.group()) if match else None
+
+
+def scenario_id(row: dict[str, Any], index: int) -> str:
+
+    return (
+
+        first_value(
+
+            row,
+
+            ["scenario_id", "id", "case_id", "scenario", "ticket_id"],
+
+        )
+
+        or f"scenario_{index:03d}"
+
+    )
+
+
+def load_scenarios() -> list[dict[str, Any]]:
+
+    if not SCENARIOS_PATH.exists():
+
+        raise FileNotFoundError(
+
+            f"Missing {SCENARIOS_PATH}. Run generate_data.py first."
+
+        )
+
+
+    df = pd.read_csv(SCENARIOS_PATH, dtype=object)
+
+    if df.empty:
+
+        raise ValueError("agent_scenarios.csv contains no scenarios.")
+
+
+    return df.where(pd.notna(df), None).to_dict(orient="records")
+
+
+def load_refund_policy() -> str:
+
+    if POLICY_FILE.exists():
+
+        return POLICY_FILE.read_text(encoding="utf-8")
+
+
+    return (
+
+        "Refund Policy. Refunds apply only to completed orders. "
+
+        "A completed order delivered in more than 45 minutes qualifies "
+
+        "for a full refund. Refunds up to INR 1000 may be approved "
+
+        "automatically. Refunds above INR 1000 require a human support "
+
+        "lead. Approved refunds are credited to the original payment "
+
+        "method within 5 working days. Requests must be raised within "
+
+        "7 days of delivery."
+
+    )
+
+
+# ============================================================
+
+# DATABASE ACCESS
+
+# ============================================================
+
+
+def get_order(order_id: str) -> dict[str, Any] | None:
+
+    """Read an order from the generated SQLite database."""
+
+
+    if not DB_PATH.exists():
+
+        raise FileNotFoundError(
+
+            f"Database not found: {DB_PATH}. Complete Part A first."
+
+        )
+
+
+    with sqlite3.connect(DB_PATH) as connection:
+
+        connection.row_factory = sqlite3.Row
+
+
+        tables = connection.execute(
+
+            """
+
+            SELECT name
+
+            FROM sqlite_master
+
+            WHERE type = 'table'
+
+              AND name NOT LIKE 'sqlite_%'
+
+            """
+
+        ).fetchall()
+
+
+        for table_row in tables:
+
+            table_name = table_row["name"]
+
+            escaped_table = table_name.replace('"', '""')
+
+
+            columns = connection.execute(
+
+                f'PRAGMA table_info("{escaped_table}")'
+
+            ).fetchall()
+
+
+            column_names = [row["name"] for row in columns]
+
+            order_column = next(
+
+                (
+
+                    column
+
+                    for column in column_names
+
+                    if column.lower() in {"order_id", "orderid"}
+
+                ),
+
+                None,
+
+            )
+
+
+            if order_column is None:
+
+                continue
+
+
+            escaped_column = order_column.replace('"', '""')
+
+            result = connection.execute(
+
+                f'SELECT * FROM "{escaped_table}" '
+
+                f'WHERE "{escaped_column}" = ? LIMIT 1',
+
+                (order_id,),
+
+            ).fetchone()
+
+
+            if result is not None:
+
+                record = dict(result)
+
+                record["_source_table"] = table_name
+
+                return record
+
+
+    return None
+
+
+def resolve_order_fields(order: dict[str, Any]) -> dict[str, Any]:
+
+    """Normalize common generated-data column names."""
+
+
+    status = first_value(order, ["status", "order_status"]).lower()
+
+
+    amount = None
+
+    for name in [
+
+        "total_amount",
+
+        "order_amount",
+
+        "amount",
+
+        "final_amount",
+
+        "total",
+
+        "price",
+
+    ]:
+
+        amount = parse_number(order.get(name))
+
+        if amount is not None:
+
+            break
+
+
+    delivery_minutes = None
+
+    for name in [
+
+        "delivery_minutes",
+
+        "delivery_time_minutes",
+
+        "delivery_duration_minutes",
+
+        "delivery_time",
+
+        "delivery_minutes_actual",
+
+    ]:
+
+        delivery_minutes = parse_number(order.get(name))
+
+        if delivery_minutes is not None:
+
+            break
+
+
+    return {
+
+        "order_id": first_value(order, ["order_id", "orderid"]),
+
+        "customer_id": first_value(order, ["customer_id", "customerid"]),
+
+        "status": status,
+
+        "amount": amount,
+
+        "delivery_minutes": delivery_minutes,
+
+        "source_table": order.get("_source_table"),
+
+        "raw": order,
+
+    }
+
+
+# ============================================================
+
+# CONTROLLED TOOLS
+
+# ============================================================
+
+
+def search_policy(question: str) -> dict[str, Any]:
+    """Return the approved refund policy in a retrieval-style response."""
+    policy = load_refund_policy()
+
+    return {
+        "results": [
+            {
+                "document": "refund_policy.txt",
+                "content": policy,
+            }
+        ],
+        "found": bool(policy.strip()),
+        "question": question,
+    }
+
+
+def calculate_refund(order_id: str) -> dict[str, Any]:
+
+    """
+
+    Calculate eligibility in Python, not in the LLM.
+
+
+    Only completed orders delivered after 45 minutes qualify.
+
+    Refunds above INR 1000 must be escalated for approval.
+
+    """
+
+
+    raw_order = get_order(order_id)
+
+
+    if raw_order is None:
+
+        return {
+
+            "status": "NOT_FOUND",
+
+            "order_id": order_id,
+
+            "refund_inr": 0.0,
+
+            "reason": "Order not found in the database.",
+
+        }
+
+
+    order = resolve_order_fields(raw_order)
+
+
+    if order["status"] != "completed":
+
+        return {
+
+            "status": "DENIED",
+
+            "order_id": order_id,
+
+            "refund_inr": 0.0,
+
+            "reason": (
+
+                f"Order status is '{order['status'] or 'unknown'}'. "
+
+                "Only completed orders are eligible."
+
+            ),
+
+            "order": order,
+
+        }
+
+
+    if order["amount"] is None or order["delivery_minutes"] is None:
+
+        return {
+
+            "status": "NEEDS_HUMAN",
+
+            "order_id": order_id,
+
+            "refund_inr": 0.0,
+
+            "reason": (
+
+                "The order amount or actual delivery time is unavailable. "
+
+                "Eligibility cannot be verified safely."
+
+            ),
+
+            "order": order,
+
+        }
+
+
+    if order["delivery_minutes"] <= ELIGIBLE_DELIVERY_MINUTES:
+
+        return {
+
+            "status": "DENIED",
+
+            "order_id": order_id,
+
+            "refund_inr": 0.0,
+
+            "reason": (
+
+                f"Actual delivery time was {order['delivery_minutes']} minutes. "
+
+                "A late-delivery refund requires more than 45 minutes."
+
+            ),
+
+            "order": order,
+
+        }
+
+
+    if order["amount"] > REFUND_LIMIT:
+
+        return {
+
+            "status": "NEEDS_HUMAN",
+
+            "order_id": order_id,
+
+            "amount": order["amount"],
+
+            "refund_inr": round(order["amount"], 2),
+
+            "reason": (
+
+                f"Potential refund INR {order['amount']:.2f} exceeds "
+
+                f"the automatic approval limit of INR {REFUND_LIMIT:.2f}. "
+
+                "Human support lead approval is required."
+
+            ),
+
+            "order": order,
+
+        }
+
+
+    return {
+
+        "status": "REFUND",
+
+        "order_id": order_id,
+
+        "amount": round(order["amount"], 2),
+
+        "refund_inr": round(order["amount"], 2),
+
+        "reason": (
+
+            "Completed order delivered after 45 minutes; "
+
+            "amount is within the automatic approval limit."
+
+        ),
+
+    }
+
+
+def refund_idempotency_key(order_id: str, amount: float) -> str:
+
+    raw = f"{order_id}|{amount:.2f}|late_delivery"
+
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def issue_refund(order_id: str, amount: float) -> dict[str, Any]:
+
+    """
+
+    Write an approved refund to a durable ledger.
+
+
+    This is a local simulation only; no real payment is made.
+
+    Duplicate refund keys are rejected.
+
+    """
+
+
+    amount = round(float(amount), 2)
+
+
+    # Independently recheck eligibility immediately before writing.
+
+    calculation = calculate_refund(order_id)
+
+
+    if calculation["status"] != "REFUND":
+
+        return {
+
+            "status": "DENIED",
+
+            "order_id": order_id,
+
+            "reason": (
+
+                "Refund was not issued because the latest eligibility "
+
+                f"check returned {calculation['status']}: "
+
+                f"{calculation.get('reason', '')}"
+
+            ),
+
+        }
+
+
+    if abs(calculation["amount"] - amount) > 0.009:
+
+        return {
+
+            "status": "DENIED",
+
+            "order_id": order_id,
+
+            "reason": "Requested amount does not match the verified order amount.",
+
+        }
+
+
+    key = refund_idempotency_key(order_id, amount)
+
+    existing = read_jsonl(LEDGER_PATH)
+
+
+    for entry in existing:
+
+        if entry.get("idempotency_key") == key:
+
+            return {
+
+                "status": "ALREADY_ISSUED",
+
+                "order_id": order_id,
+
+                "amount": amount,
+
+                "ledger_id": entry.get("ledger_id"),
+
+                "reason": "A matching refund already exists in the ledger.",
+
+            }
+
+
+    ledger_id = f"refund_{key[:16]}"
+
+    entry = {
+
+        "ledger_id": ledger_id,
+
+        "idempotency_key": key,
+
+        "order_id": order_id,
+
+        "amount": amount,
+
+        "currency": "INR",
+
+        "reason": "eligible_late_delivery",
+
+        "status": "SIMULATED_APPROVED",
+
+        "created_at": now_utc(),
+
+        "note": "Simulation only; no actual payment was made.",
+
+    }
+
+
+    append_jsonl(LEDGER_PATH, entry)
+
+
+    return {
+
+        "status": "REFUND",
+
+        "order_id": order_id,
+
+        "amount": amount,
+
+        "ledger_id": ledger_id,
+
+        "reason": "Refund recorded in the local simulation ledger.",
+
+    }
+
+
+def escalate_to_human(
+
+    order_id: str,
+
+    reason: str,
+
+    summary: str = "",
+
+) -> dict[str, Any]:
+
+    """Record a human handoff request without approving a refund."""
+
+
+    handoff_id = hashlib.sha256(
+
+        f"{order_id}|{reason}".encode("utf-8")
+
+    ).hexdigest()[:16]
+
+
+    record = {
+
+        "event": "human_handoff",
+
+        "handoff_id": handoff_id,
+
+        "order_id": order_id,
+
+        "reason": reason,
+
+        "summary": summary or reason,
+
+        "status": "PENDING_HUMAN_REVIEW",
+
+        "created_at": now_utc(),
+
+    }
+
+
+    # Keep handoffs in the run log as well as the persistent state.
+
+    return record
+
+
+# ============================================================
+
+# LLM TOOL DEFINITIONS
+
+# ============================================================
+
+
+TOOLS = [
+
+    {
+
+        "type": "function",
+
+        "function": {
+
+            "name": "get_order",
+
+            "description": "Look up an order by its exact order ID.",
+
+            "parameters": {
+
+                "type": "object",
+
+                "properties": {
+
+                    "order_id": {"type": "string"},
+
+                },
+
+                "required": ["order_id"],
+
+            },
+
+        },
+
+    },
+
+    {
+
+        "type": "function",
+
+        "function": {
+
+            "name": "search_policy",
+
+            "description": "Retrieve the refund policy before deciding eligibility.",
+
+            "parameters": {
+
+                "type": "object",
+
+                "properties": {
+
+                    "question": {"type": "string"},
+
+                },
+
+                "required": ["question"],
+
+            },
+
+        },
+
+    },
+
+    {
+
+        "type": "function",
+
+        "function": {
+
+            "name": "calculate_refund",
+
+            "description": "Verify refund eligibility using the order database and policy rules.",
+
+            "parameters": {
+
+                "type": "object",
+
+                "properties": {
+
+                    "order_id": {"type": "string"},
+
+                },
+
+                "required": ["order_id"],
+
+            },
+
+        },
+
+    },
+
+    {
+
+        "type": "function",
+
+        "function": {
+
+            "name": "issue_refund",
+
+            "description": "Record an eligible refund of INR 1000 or less in the simulation ledger.",
+
+            "parameters": {
+
+                "type": "object",
+
+                "properties": {
+
+                    "order_id": {"type": "string"},
+
+                    "amount": {"type": "number"},
+
+                },
+
+                "required": ["order_id", "amount"],
+
+            },
+
+        },
+
+    },
+
+    {
+
+        "type": "function",
+
+        "function": {
+
+            "name": "escalate_to_human",
+
+            "description": "Hand off an unresolved case or refund above INR 1000 to a human.",
+
+            "parameters": {
+
+                "type": "object",
+
+                "properties": {
+
+                    "order_id": {"type": "string"},
+
+                    "reason": {"type": "string"},
+
+                    "summary": {"type": "string"},
+
+                },
+
+                "required": ["order_id", "reason"],
+
+            },
+
+        },
+
+    },
+
+]
+
+
+# ============================================================
+
+# AGENT EXECUTION
+
+# ============================================================
+
+
+def extract_arguments(tool_call):
+
+    raw = getattr(tool_call, "arguments", {})
+
+
+    if isinstance(raw, dict):
+
+        return raw
+
+
+    if isinstance(raw, str):
+
+        try:
+
+            return json.loads(raw)
+
+        except json.JSONDecodeError:
+
+            return {}
+
+
+    return {}
+
+
+
+
+def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    """Execute approved local tools and normalize mock-agent arguments."""
+    try:
+        if name == "get_order":
+            order_id = normalize(arguments.get("order_id"))
+            raw_order = get_order(order_id)
+
+            if raw_order is None:
+                # The mock agent checks for the "error" key.
+                return {
+                    "status": "NOT_FOUND",
+                    "order_id": order_id,
+                    "error": "Order not found",
+                }
+
+            order = resolve_order_fields(raw_order)
+            return {
+                "status": order["status"],
+                "order_id": order["order_id"],
+                "order_amount": order["amount"],
+                "delivery_minutes": order["delivery_minutes"],
+                "customer_id": order["customer_id"],
+                "source_table": order["source_table"],
+                "order": raw_order,
+            }
+
+        if name == "search_policy":
+            question = normalize(
+                arguments.get("question") or arguments.get("query")
+            )
+            return search_policy(question)
+
+        if name == "calculate_refund":
+            # The mock agent omits order_id. Recover it from the active scenario
+            # only if your scenario loop has supplied it in the arguments.
+            order_id = normalize(arguments.get("order_id"))
+            if not order_id:
+                return {
+                    "status": "ERROR",
+                    "refund_inr": 0.0,
+                    "reason": "Missing order_id for refund calculation.",
+                }
+            return calculate_refund(order_id)
+
+        if name == "issue_refund":
+            order_id = normalize(arguments.get("order_id"))
+            amount_value = arguments.get(
+                "amount", arguments.get("refund_inr")
+            )
+
+            if not order_id or amount_value is None:
+                return {
+                    "status": "DENIED",
+                    "order_id": order_id,
+                    "reason": "Order ID or refund amount is missing.",
+                }
+
+            refund_result = issue_refund(order_id, float(amount_value))
+
+            # Normalize the amount field for the mock agent.
+            refund_result["refund_inr"] = refund_result.get(
+                "refund_inr",
+                refund_result.get("amount", float(amount_value)),
+            )
+
+            return refund_result
+
+        if name == "escalate_to_human":
+            order_id = normalize(arguments.get("order_id"))
+            reason = normalize(arguments.get("reason")) or (
+                "Refund requires human review."
+            )
+            summary = normalize(arguments.get("summary"))
+
+            amount_value = arguments.get(
+                "amount", arguments.get("refund_inr")
+            )
+            if amount_value is not None:
+                summary = (
+                    f"{summary} Potential refund: INR "
+                    f"{float(amount_value):.2f}."
+                ).strip()
+
+            return escalate_to_human(order_id, reason, summary)
+
+        return {
+            "status": "ERROR",
+            "reason": f"Unknown tool: {name}",
+        }
+
+    except (TypeError, ValueError) as exc:
+        return {
+            "status": "ERROR",
+            "reason": f"Invalid arguments for {name}: {exc}",
+        }
+
+
+
+
+def call_llm(messages: list[dict[str, Any]]) -> Any:
+
+    last_error = None
+
+
+    for attempt in range(1, MAX_LLM_RETRIES + 1):
+
+        try:
+
+            return mock_llm.chat(messages, tools=TOOLS)
+
+        except mock_llm.TransientLLMError as exc:
+
+            last_error = exc
+
+            time.sleep(0.05 * attempt)
+
+
+    raise RuntimeError(f"Mock LLM failed after retries: {last_error}")
+
+
+def get_message(response: Any) -> Any:
+
+    return response.choices[0].message
+
+
+def message_content(message: Any) -> str:
+
+    return normalize(getattr(message, "content", ""))
+
+
+def message_tool_calls(message: Any) -> list[Any]:
+
+    return list(getattr(message, "tool_calls", None) or [])
+
+
+def identify_order_id(row: dict[str, Any]) -> str:
+
+    return first_value(
+
+        row,
+
+        ["order_id", "orderid", "target_order_id", "input_order_id"],
+
+    )
+
+
+def identify_request(row: dict[str, Any]) -> str:
+
+    return (
+
+        first_value(
+
+            row,
+
+            [
+
+                "request",
+
+                "user_request",
+
+                "prompt",
+
+                "scenario_text",
+
+                "description",
+
+                "question",
+
+                "customer_message",
+
+                "text",
+
+            ],
+
+        )
+
+        or json.dumps(row, ensure_ascii=False, default=json_default)
+
+    )
+
+
+def run_one_scenario(
+
+    row: dict[str, Any],
+
+    index: int,
+
+    state: dict[str, Any],
+
+    token_limit: int = TOKEN_LIMIT,
+
+    time_limit_seconds: float = TIME_LIMIT_SECONDS,
+
+) -> dict[str, Any]:
+
+    sid = scenario_id(row, index)
+
+    request = identify_request(row)
+
+    order_id = identify_order_id(row)
+
+
+    run_record: dict[str, Any] = {
+
+        "scenario_id": sid,
+
+        "request": request,
+
+        "order_id": order_id,
+
+        "started_at": now_utc(),
+
+        "status": "RUNNING",
+
+        "steps": [],
+
+        "executed_tools": [],
+
+        "llm_calls": 0,
+
+        "tokens_used": 0,
+
+        "human_handoff": None,
+
+    }
+
+
+    state["in_progress"][sid] = {
+
+        "scenario_id": sid,
+
+        "request": request,
+
+        "order_id": order_id,
+
+        "started_at": run_record["started_at"],
+
+        "executed_tools": [],
+
+        "steps": [],
+
+        "llm_calls": 0,
+
+        "tokens_used": 0,
+
+        "messages": [],
+
+        "step_number": 0,
+
+    }
+
+    save_state(state)
+
+
+    system_prompt = (
+
+        "AGENT\n"
+
+        "You are an Instamart support agent. Use the provided tools to "
+
+        "inspect orders and policy. Never invent order data. Follow the "
+
+        "refund policy: only completed orders qualify; late-delivery refunds "
+
+        "require delivery in more than 45 minutes; refunds above INR 1000 "
+
+        "require human approval. Do not issue a refund unless the Python "
+
+        "eligibility tool explicitly returns status REFUND. If an order is "
+
+        "missing, data is incomplete, a refund is denied, or the workflow "
+
+        "cannot be safely completed, explain the outcome or escalate. "
+
+        "Never claim a real payment was made: this is a local simulation."
+
+    )
+
+
+    messages: list[dict[str, Any]] = [
+
+        {"role": "system", "content": system_prompt},
+
+        {
+
+            "role": "user",
+
+            "content": (
+
+                f"SCENARIO_ID: {sid}\n"
+
+                f"ORDER_ID: {order_id or 'not supplied'}\n"
+
+                f"REQUEST: {request}\n"
+
+                "Investigate the request and follow the tools and policy."
+
+            ),
+
+        },
+
+    ]
+
+
+    final_text = ""
+
+    terminal_status = "MAX_STEPS_REACHED"
+
+    started_clock = time.monotonic()
+
+
+    try:
+
+        for step_number in range(1, MAX_STEPS + 1):
+
+            if time.monotonic() - started_clock >= time_limit_seconds:
+                terminal_status = "FALLBACK_TIMEOUT"
+                final_text = (
+                    "Fallback: execution time limit reached. "
+                    "Human review is required."
+                )
+                run_record["human_handoff"] = {
+                    "status": "REQUIRED",
+                    "reason": "Execution time limit reached.",
+                }
+                break
+
+            state["in_progress"][sid]["step_number"] = step_number
+            state["in_progress"][sid]["messages"] = messages
+            save_state(state)
+
+            response = call_llm(messages)
+
+            run_record["llm_calls"] += 1
+
+            usage = getattr(response, "usage", None)
+            response_tokens = int(
+                getattr(usage, "total_tokens", 0) or 0
+            )
+            run_record["tokens_used"] += response_tokens
+
+            state["in_progress"][sid]["llm_calls"] = run_record["llm_calls"]
+            state["in_progress"][sid]["tokens_used"] = run_record["tokens_used"]
+            state["in_progress"][sid]["messages"] = messages
+            state["in_progress"][sid]["step_number"] = step_number
+            save_state(state)
+
+            if run_record["tokens_used"] > token_limit:
+                terminal_status = "FALLBACK_TOKEN_LIMIT"
+                final_text = (
+                    "Fallback: token budget exceeded. "
+                    "Human review is required."
+                )
+                run_record["human_handoff"] = {
+                    "status": "REQUIRED",
+                    "reason": "Token budget exceeded.",
+                }
+                break
+
+            message = get_message(response)
+
+            calls = message_tool_calls(message)
+
+            content = message_content(message)
+
+
+            if not calls:
+
+                final_text = content or "Agent finished without a response."
+
+                terminal_status = "COMPLETED"
+
+                run_record["steps"].append(
+
+                    {
+
+                        "step": step_number,
+
+                        "type": "final",
+
+                        "content": final_text,
+
+                    }
+
+                )
+
+                break
+
+
+            messages.append({
+
+                "role": "assistant",
+
+                "content": None,
+
+                "tool_calls": [
+
+                    {
+
+                        "id": getattr(call, "id", f"call_{step_number}_{i}"),
+
+                        "name": getattr(call, "name", ""),
+
+                        "arguments": getattr(call, "arguments", {}),
+
+                    }
+
+                    for i, call in enumerate(calls)
+
+                ],
+
+            })
+
+
+            for call_index, call in enumerate(calls):
+
+                name = normalize(getattr(call, "name", ""))
+
+
+                arguments = extract_arguments(call)
+
+                
+                # Safety: recover the order ID from the scenario or the
+                # previously executed get_order result.
+                if (
+                    name in {
+                        "calculate_refund",
+                        "issue_refund",
+                        "escalate_to_human",
+                    }
+                    and not arguments.get("order_id")
+                ):
+                    if order_id:
+                        arguments["order_id"] = order_id
+                    else:
+                        for previous_tool in reversed(
+                            run_record.get("executed_tools", [])
+                        ):
+                            if previous_tool.get("tool") == "get_order":
+                                previous_result = previous_tool.get("result", {})
+                                candidate_id = previous_result.get("order_id")
+
+                                if (
+                                    candidate_id
+                                    and previous_result.get("status") != "NOT_FOUND"
+                                ):
+                                    arguments["order_id"] = candidate_id
+                                break
+
+
+
+                # Limit automatic refund issuance to a verified calculation.
+
+                if name == "issue_refund":
+
+                    verified = any(
+
+                        item.get("tool") == "calculate_refund"
+
+                        and item.get("result", {}).get("status") == "REFUND"
+
+                        and item.get("result", {}).get("order_id")
+
+                        == normalize(arguments.get("order_id"))
+
+                        for item in run_record["executed_tools"]
+
+                    )
+
+                    if not verified:
+
+                        result = {
+
+                            "status": "DENIED",
+
+                            "reason": (
+
+                                "No successful eligibility calculation exists "
+
+                                "for this order in the current run."
+
+                            ),
+
+                        }
+
+                    else:
+
+                        result = execute_tool(name, arguments)
+
+                else:
+
+                    result = execute_tool(name, arguments)
+
+
+                tool_entry = {
+
+                    "step": step_number,
+
+                    "tool": name,
+
+                    "arguments": arguments,
+
+                    "result": result,
+
+                    "executed_at": now_utc(),
+
+                }
+
+
+                run_record["executed_tools"].append(tool_entry)
+
+                run_record["steps"].append(tool_entry)
+
+
+                state["in_progress"][sid]["executed_tools"].append(tool_entry)
+
+                state["in_progress"][sid]["steps"].append(tool_entry)
+
+                save_state(state)
+
+
+                if name == "escalate_to_human":
+
+                    run_record["human_handoff"] = result
+
+
+                # If a policy search loops repeatedly, stop safely.
+
+                
+                # Stop repeated policy searches using the required fallback status.
+                searches = sum(
+                    1
+                    for item in run_record["executed_tools"]
+                    if item["tool"] == "search_policy"
+                )
+
+                if searches >= 3:
+                    result = {
+                        "status": "FALLBACK_MAX_ITERATIONS",
+                        "reason": "Maximum policy-search iterations reached.",
+                    }
+                    tool_entry["result"] = result
+                    terminal_status = "FALLBACK_MAX_ITERATIONS"
+
+                call_id = getattr(call, "id", f"call_{step_number}_{call_index}")
+
+                messages.append(
+                    {
+                        "role": "tool",
+                        "tool_call_id": call_id,
+                        "name": name,
+                        "content": json.dumps(
+                            result, ensure_ascii=False, default=json_default
+                        ),
+                    }
+                )
+
+                if terminal_status == "FALLBACK_MAX_ITERATIONS":
+                    break
+
+            if terminal_status == "FALLBACK_MAX_ITERATIONS":
+                final_text = (
+                    "Fallback: maximum policy-search iterations reached. "
+                    "Human review may be required."
+                )
+                break
+
+
+
+        else:
+
+            terminal_status = "MAX_STEPS_REACHED"
+
+
+        if terminal_status == "MAX_STEPS_REACHED":
+
+            # The step limit must never be bypassed by another LLM call.
+
+            handoff = escalate_to_human(
+
+                order_id=order_id or "unknown",
+
+                reason=f"Agent reached the {MAX_STEPS}-step limit.",
+
+                summary=request,
+
+            )
+
+            run_record["human_handoff"] = handoff
+
+            final_text = (
+
+                f"Stopped after {MAX_STEPS} steps. Case handed off for human review."
+
+            )
+
+
+    except Exception as exc:
+
+        terminal_status = "ERROR"
+
+        final_text = f"Agent stopped due to an error: {type(exc).__name__}: {exc}"
+
+        run_record["error"] = final_text
+
+
+    run_record["status"] = terminal_status
+
+    run_record["final_response"] = final_text
+
+    run_record["finished_at"] = now_utc()
+
+
+    append_jsonl(RUNS_PATH, run_record)
+
+
+    state["completed"][sid] = {
+
+        "status": terminal_status,
+
+        "finished_at": run_record["finished_at"],
+
+        "final_response": final_text,
+
+        "llm_calls": run_record["llm_calls"],
+
+        "tokens_used": run_record["tokens_used"],
+
+    }
+
+    state["in_progress"].pop(sid, None)
+
+    save_state(state)
+
+
+    return run_record
+
+
+# ============================================================
+
+# RESUME AND EVALUATION
+
+# ============================================================
+
+
+def main() -> None:
+
+    resume = "--resume" in sys.argv
+
+    reset = "--reset" in sys.argv
+
+
+    if reset:
+
+        # Explicit reset only: preserve the policy and raw input data.
+
+        for path in (RUNS_PATH, LEDGER_PATH, STATE_PATH):
+
+            if path.exists():
+
+                path.unlink()
+
+        print("Part D output/state files reset.")
+
+
+    scenarios = load_scenarios()
+
+    state = load_state()
+
+
+    # Rebuild completion information from the durable run log too.
+
+    for record in read_jsonl(RUNS_PATH):
+
+        sid = normalize(record.get("scenario_id"))
+
+        if sid and record.get("status") != "RUNNING":
+
+            state["completed"][sid] = {
+
+                "status": record.get("status"),
+
+                "finished_at": record.get("finished_at"),
+
+                "final_response": record.get("final_response"),
+
+            }
+
+
+    save_state(state)
+
+
+    if not resume:
+
+        print("Mode: fresh run (previously completed scenarios are skipped).")
+
+    else:
+
+        print("Mode: resume (previously completed scenarios are skipped).")
+
+
+    print(f"Scenarios loaded: {len(scenarios)}")
+
+    print(f"Existing refund ledger entries: {len(read_jsonl(LEDGER_PATH))}")
+
+
+    completed_this_run = 0
+
+    skipped = 0
+
+    outcomes: list[dict[str, Any]] = []
+
+
+    for index, row in enumerate(scenarios, start=1):
+
+        sid = scenario_id(row, index)
+
+
+        previous = state["completed"].get(sid, {})
+
+        previous_status = previous.get("status", "")
+
+
+        if sid in state["completed"] and previous_status not in {
+
+            "ERROR",
+
+            "RUNNING",
+
+        }:
+
+            skipped += 1
+
+            continue
+
+
+        print(f"\n[{index}/{len(scenarios)}] Running {sid}")
+
+
+        try:
+
+            result = run_one_scenario(row, index, state)
+
+        except Exception as exc:
+
+            result = {
+
+                "scenario_id": sid,
+
+                "status": "ERROR",
+
+                "error": f"{type(exc).__name__}: {exc}",
+
+                "executed_tools": [],
+
+                "final_response": f"Scenario failed: {type(exc).__name__}: {exc}",
+
+            }
+
+            append_jsonl(RUNS_PATH, result)
+
+
+        outcomes.append(result)
+
+        completed_this_run += 1
+
+
+        print(f"Status: {result['status']}")
+
+        if result.get("error"):
+
+                print(f"Error: {result['error']}")
+
+        print(f"Tools executed: {len(result.get('executed_tools', []))}")
+
+
+    all_runs = read_jsonl(RUNS_PATH)
+
+    ledger = read_jsonl(LEDGER_PATH)
+
+
+    print("\n" + "=" * 65)
+
+    print("PART D: AGENTIC WORKFLOW EVALUATION")
+
+    print("=" * 65)
+
+    print(f"Input scenarios:              {len(scenarios)}")
+
+    print(f"Scenarios completed now:      {completed_this_run}")
+
+    print(f"Previously completed/skipped: {skipped}")
+
+    print(f"Durable run records:          {len(all_runs)}")
+
+    print(f"Refund ledger entries:        {len(ledger)}")
+
+    print(f"Human handoffs in all runs:   "
+
+          f"{sum(bool(r.get('human_handoff')) for r in all_runs)}")
+
+    print(f"Run log:                      {RUNS_PATH.relative_to(ROOT)}")
+
+    print(f"Refund ledger:                {LEDGER_PATH.relative_to(ROOT)}")
+
+    print(f"Persistent state:             {STATE_PATH.relative_to(ROOT)}")
+
+
+    # Count only the latest result for each scenario.
+    # Preserve all historical records in agent_runs.jsonl.
+    latest_by_scenario: dict[str, dict[str, Any]] = {}
+
+    for record in all_runs:
+        sid = normalize(record.get("scenario_id"))
+
+        if sid:
+            latest_by_scenario[sid] = record
+
+    latest_runs = list(latest_by_scenario.values())
+
+    statuses: dict[str, int] = {}
+
+    for record in latest_runs:
+        status = normalize(record.get("status")) or "UNKNOWN"
+        statuses[status] = statuses.get(status, 0) + 1
+
+    latest_handoffs = sum(
+        bool(record.get("human_handoff"))
+        for record in latest_runs
+    )
+
+
+    print("\nRun status counts:")
+
+    for status, count in sorted(statuses.items()):
+
+        print(f"  {status}: {count}")
+
+
+    # Save a concise machine-readable summary.
+
+    summary = {
+
+        "created_at": now_utc(),
+
+        "input_scenarios": len(scenarios),
+
+        "durable_run_records": len(all_runs),
+
+        "refund_ledger_entries": len(ledger),
+
+        "run_status_counts": statuses,
+
+        "human_handoffs": latest_handoffs,
+
+        "limitations": [
+
+            "The LLM is a deterministic local mock, not a production model.",
+
+            "Refund entries are simulated; no real payment is issued.",
+
+            "Refund eligibility depends on the available generated order fields.",
+
+        ],
+
+    }
+
+
+    (OUTPUT_DIR / "part_d_metrics.json").write_text(
+
+        json.dumps(summary, indent=2, default=json_default),
+
+        encoding="utf-8",
+
+    )
+
+
+    print("\nSaved outputs:")
+
+    print("  outputs/agent_runs.jsonl")
+
+    print("  outputs/refund_ledger.jsonl")
+
+    print("  outputs/part_d_metrics.json")
+
+    print("  state/part_d_state.json")
+
+
+if __name__ == "__main__":
+
+    main()
